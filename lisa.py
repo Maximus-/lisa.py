@@ -59,30 +59,6 @@ MAX_DISTANCE            =   PAGE_SIZE*10
 ####################################
 g_ignore_frame_pointer  =   False
 
-def banner(debugger,command,result,dict):
-    
-    lisa2="""
-        
-        lllllll   iiii
-        l:::::l  i::::i
-        l:::::l   iiii
-        l:::::l
-        l::::l iiiiiii     ssssssssss     aaaaaaaaaaaaa
-        l::::l i:::::i   ss::::::::::s    a::::::::::::a
-        l::::l  i::::i ss:::::::::::::s   aaaaaaaaa:::::a
-        l::::l  i::::i s::::::ssss:::::s           a::::a
-        l::::l  i::::i  s:::::s  ssssss     aaaaaaa:::::a
-        l::::l  i::::i    s::::::s        aa::::::::::::a
-        l::::l  i::::i       s::::::s    a::::aaaa::::::a
-        l::::l  i::::i ssssss   s:::::s a::::a    a:::::a
-        l::::::li::::::is:::::ssss::::::sa::::a    a:::::a
-        l::::::li::::::is::::::::::::::s a:::::aaaa::::::a
-        l::::::li::::::i s:::::::::::ss   a::::::::::aa:::a
-        lllllllliiiiiiii  sssssssssss      aaaaaaaaaa  aaaa
-        """
-    print(tty_colors.green()+random.choice([lisa2])+tty_colors.default())
-    print(tty_colors.red()+"\t-An Exploit Dev Swiss Army Knife. Version: "+lisaversion+tty_colors.default())
-
 # convert to hex
 def to_hex(var):
     """
@@ -122,6 +98,44 @@ def shell(debugger,command,result,dict):
     except:
         print('Please enter a proper shell command.Eg: shell ls')
     return
+
+def get_registers(frame, kind):
+    regs = frame.GetRegisters()
+    for value in regs:
+        if kind.lower() in value.GetName().lower():
+            return value
+
+def _pretty_print_registers(frame, regs):
+    rax = regs.GetIndexOfChildWithName("rax")
+    eax = regs.GetIndexOfChildWithName("eax")
+    
+    regs32 = "eax ebx ecx edx esi edi ebp esp eip".split()
+    regs64 = "rax rbx rcx rdx rsi rdi rbp rsp rip r8 r9 r10 r11 r12 r13 r14 r15".split()
+    
+    searchRegs = regs64
+    pcRegister = "rip"
+    
+    if rax == 4294967295:
+        searchRegs = regs32
+        pcRegister = "eip"
+        # 32bit, i guess
+
+    for r in searchRegs:
+        reg = regs.GetChildMemberWithName(r)
+        name = reg.GetName()
+        val = reg.GetValue()
+        intval = int(val, 16)
+        aval = str(hex(intval).rstrip("L"))
+        # done to remove leading 0s
+        print(tty_colors.green() + name.ljust(3, " ").upper() + tty_colors.default() + ": " + aval)
+
+def pretty_print_registers():
+    regs = get_registers(lldb.debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame(), "general purpose")
+    if regs is not None:
+        _pretty_print_registers(lldb.frame, regs)
+    else:
+        print("Couldn't get registers. :(")
+
 
 
 # term colors
@@ -486,21 +500,8 @@ def context(debugger,command,result,dict):
     print
     lldb.debugger.GetCommandInterpreter().HandleCommand("disassemble --start-address=" + pc + " --count=1", res)
     data = res.GetOutput().split("\n")[1]
-
     
-    op, error=executeReturnOutput(debugger,"register read",result,dict)
-    print(tty_colors.blue()+"[registers]"+tty_colors.default())
-    for reg in op.split("\n\n")[0].split('General Purpose Registers:\n')[1].split('eflags')[0].split("\n"):
-        reg         = reg.split(" = ")
-        reg_value   = " = ".join(reg[1:])
-        reg         = reg[0].strip(" ")
-        
-        if reg in data:
-            print("\t",tty_colors.red()+reg+tty_colors.default()+" = "+tty_colors.red()+reg_value+tty_colors.default())
-        else:
-            print("\t",tty_colors.green()+reg+tty_colors.default()+" = "+tty_colors.green()+reg_value+tty_colors.default())
-
-    print(tty_colors.blue()+"[/registers]"+tty_colors.default())
+    pretty_print_registers()
 
     return
 
@@ -3066,7 +3067,6 @@ def __lldb_init_module(debugger, dict):
     debugger.HandleCommand('command script add --function lisa.si si')
     debugger.HandleCommand('command script add --function lisa.so so')
     debugger.HandleCommand('command script add --function lisa.backtrace pbt')    
-    debugger.HandleCommand('command script add --function lisa.banner banner')
     debugger.HandleCommand('command script add --function lisa.patternCreate patterncreate')
     debugger.HandleCommand('command script add --function lisa.patternOffset patternoffset')
     debugger.HandleCommand('command script add --function lisa.checkIfCyclic checkifcyclic')    
@@ -3082,8 +3082,6 @@ def __lldb_init_module(debugger, dict):
     debugger.HandleCommand('command script add --function lisa.vtable vtable')
     debugger.HandleCommand('command script add --function lisa.launch launch')
     debugger.HandleCommand('command script add --function lisa.shell shell')
-
-    debugger.HandleCommand('banner')
 
     res = lldb.SBCommandReturnObject()
     executeReturnOutput(debugger, 'target stop-hook add -o ct', res, dict)
